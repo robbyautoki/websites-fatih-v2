@@ -17,13 +17,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   Table,
   TableBody,
   TableCell,
@@ -45,6 +38,7 @@ interface ImportedDomain {
   originalDomain: string;
   suggestedVariant?: string;
   variantPrice?: number;
+  forwardUrl?: string;  // Custom URL für Weiterleitung
   status: 'pending' | 'searching' | 'found' | 'approving' | 'purchasing' | 'configuring_email' | 'configuring_url' | 'done' | 'error' | 'no_variant';
   error?: string;
   addedAt: string;
@@ -52,12 +46,19 @@ interface ImportedDomain {
 
 interface CsvImportSettings {
   emailForwardTo: string;
-  emailPrefix: string;
+  lastEmailPrefix: string;  // Track last used prefix
   domains: ImportedDomain[];
 }
 
 const CSV_STORAGE_KEY = "domain-csv-import-v2";
 const EMAIL_PREFIXES = ['info', 'support', 'sekretariat', 'it', 'kontakt', 'verwaltung', 'buero'];
+
+// Random email prefix - never same as last one
+function getRandomEmailPrefix(lastPrefix: string): string {
+  const availablePrefixes = EMAIL_PREFIXES.filter(p => p !== lastPrefix);
+  const randomIndex = Math.floor(Math.random() * availablePrefixes.length);
+  return availablePrefixes[randomIndex];
+}
 
 // CSV Parser der Quotes und Kommas korrekt behandelt
 function parseCSVLine(line: string): string[] {
@@ -119,7 +120,7 @@ function generateDomainVariants(domain: string): string[] {
 export default function CsvImportPage() {
   const [csvImportSettings, setCsvImportSettings] = useState<CsvImportSettings>({
     emailForwardTo: "",
-    emailPrefix: "info",
+    lastEmailPrefix: "",
     domains: [],
   });
   const [csvProcessingDomain, setCsvProcessingDomain] = useState<string | null>(null);
@@ -254,16 +255,22 @@ export default function CsvImportPage() {
         throw new Error(purchaseResult.message);
       }
 
+      // Random email prefix - never same as last one
+      const emailPrefix = getRandomEmailPrefix(csvImportSettings.lastEmailPrefix);
+      saveCsvSettings({ ...csvImportSettings, lastEmailPrefix: emailPrefix });
+
       updateCsvDomain(originalDomain, { status: 'configuring_email' });
       const emailResult = await setEmailForward(domain.suggestedVariant, [
-        { username: csvImportSettings.emailPrefix || 'info', forwardTo: csvImportSettings.emailForwardTo }
+        { username: emailPrefix, forwardTo: csvImportSettings.emailForwardTo }
       ]);
       if (!emailResult.success) {
         throw new Error(emailResult.message);
       }
 
+      // Use custom URL if provided, otherwise fallback to original domain
+      const forwardUrl = domain.forwardUrl || `https://${originalDomain}`;
       updateCsvDomain(originalDomain, { status: 'configuring_url' });
-      const urlResult = await setUrlForwarding(domain.suggestedVariant, `https://${originalDomain}`, true);
+      const urlResult = await setUrlForwarding(domain.suggestedVariant, forwardUrl, true);
       if (!urlResult.success) {
         throw new Error(urlResult.message);
       }
@@ -287,16 +294,22 @@ export default function CsvImportPage() {
     setCsvProcessingDomain(originalDomain);
 
     try {
+      // Random email prefix - never same as last one
+      const emailPrefix = getRandomEmailPrefix(csvImportSettings.lastEmailPrefix);
+      saveCsvSettings({ ...csvImportSettings, lastEmailPrefix: emailPrefix });
+
       updateCsvDomain(originalDomain, { status: 'configuring_email', error: undefined });
       const emailResult = await setEmailForward(domain.suggestedVariant, [
-        { username: csvImportSettings.emailPrefix || 'info', forwardTo: csvImportSettings.emailForwardTo }
+        { username: emailPrefix, forwardTo: csvImportSettings.emailForwardTo }
       ]);
       if (!emailResult.success) {
         throw new Error(emailResult.message);
       }
 
+      // Use custom URL if provided, otherwise fallback to original domain
+      const forwardUrl = domain.forwardUrl || `https://${originalDomain}`;
       updateCsvDomain(originalDomain, { status: 'configuring_url' });
-      const urlResult = await setUrlForwarding(domain.suggestedVariant, `https://${originalDomain}`, true);
+      const urlResult = await setUrlForwarding(domain.suggestedVariant, forwardUrl, true);
       if (!urlResult.success) {
         throw new Error(urlResult.message);
       }
@@ -391,26 +404,8 @@ export default function CsvImportPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
-            <div className="space-y-2">
-              <Label htmlFor="email-prefix">Email Präfix</Label>
-              <Select
-                value={csvImportSettings.emailPrefix || 'info'}
-                onValueChange={(value) => saveCsvSettings({ ...csvImportSettings, emailPrefix: value })}
-              >
-                <SelectTrigger className="w-[140px]">
-                  <SelectValue placeholder="Präfix wählen" />
-                </SelectTrigger>
-                <SelectContent>
-                  {EMAIL_PREFIXES.map(prefix => (
-                    <SelectItem key={prefix} value={prefix}>
-                      {prefix}@
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
             <div className="flex-1 space-y-2">
-              <Label htmlFor="email-forward">Weiterleitung an</Label>
+              <Label htmlFor="email-forward">Email Weiterleitung an</Label>
               <Input
                 id="email-forward"
                 type="email"
@@ -418,6 +413,9 @@ export default function CsvImportPage() {
                 value={csvImportSettings.emailForwardTo}
                 onChange={(e) => saveCsvSettings({ ...csvImportSettings, emailForwardTo: e.target.value })}
               />
+              <p className="text-xs text-muted-foreground">
+                Email Präfix wird automatisch zufällig gewählt (info, support, sekretariat, etc.)
+              </p>
             </div>
             <div className="flex gap-2">
               <Button variant="outline" onClick={() => fileInputRef.current?.click()}>
@@ -457,6 +455,7 @@ export default function CsvImportPage() {
                   <TableHead>Original Domain</TableHead>
                   <TableHead>Variante</TableHead>
                   <TableHead>Preis</TableHead>
+                  <TableHead>Forward URL</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="text-right">Aktionen</TableHead>
                 </TableRow>
@@ -467,6 +466,14 @@ export default function CsvImportPage() {
                     <TableCell className="font-medium">{d.originalDomain}</TableCell>
                     <TableCell>{d.suggestedVariant || "-"}</TableCell>
                     <TableCell>{d.variantPrice ? `${d.variantPrice}€` : "-"}</TableCell>
+                    <TableCell>
+                      <Input
+                        placeholder={`https://${d.originalDomain}`}
+                        value={d.forwardUrl || ''}
+                        onChange={(e) => updateCsvDomain(d.originalDomain, { forwardUrl: e.target.value })}
+                        className="w-40 text-xs"
+                      />
+                    </TableCell>
                     <TableCell>
                       {getStatusBadge(d.status)}
                       {d.error && (
