@@ -129,7 +129,11 @@ export default function CsvImportPage() {
   const [loading, setLoading] = useState(true);
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [emailForwardTo, setEmailForwardTo] = useState('');
-  const [lastEmailPrefix, setLastEmailPrefix] = useState('');
+  const [lastEmailPrefix, setLastEmailPrefix] = useState(() => {
+    // Start with a random prefix so the first domain also gets a random one
+    const randomIndex = Math.floor(Math.random() * EMAIL_PREFIXES.length);
+    return EMAIL_PREFIXES[randomIndex];
+  });
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // CSV Preview States

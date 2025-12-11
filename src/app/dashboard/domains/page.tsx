@@ -51,13 +51,16 @@ export default function DomainsPage() {
       setDynadotDomains(dynadot);
       setImportedDomains(imported);
 
-      // Initialize settings for Dynadot domains
+      // Initialize settings for Dynadot domains with data from ImportedDomain if available
       const settings: Record<string, DomainSettings> = {};
       dynadot.forEach(d => {
+        // Check if this domain was purchased through our app
+        const importedMatch = imported.find(i => i.purchasedDomain === d.domain);
+
         settings[d.domain] = {
-          forwardUrl: '',
-          emailPrefix: 'info',
-          emailForwardTo: '',
+          forwardUrl: importedMatch?.forwardUrl || '',
+          emailPrefix: importedMatch?.emailPrefix || '',
+          emailForwardTo: importedMatch?.emailForwardTo || '',
           saving: false
         };
       });
