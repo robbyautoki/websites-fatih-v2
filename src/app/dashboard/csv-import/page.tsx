@@ -17,6 +17,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Table,
   TableBody,
   TableCell,
@@ -45,10 +52,45 @@ interface ImportedDomain {
 
 interface CsvImportSettings {
   emailForwardTo: string;
+  emailPrefix: string;
   domains: ImportedDomain[];
 }
 
 const CSV_STORAGE_KEY = "domain-csv-import-v2";
+const EMAIL_PREFIXES = ['info', 'support', 'sekretariat', 'it', 'kontakt', 'verwaltung', 'buero'];
+
+// CSV Parser der Quotes und Kommas korrekt behandelt
+function parseCSVLine(line: string): string[] {
+  const result: string[] = [];
+  let current = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    if (char === '"') {
+      inQuotes = !inQuotes;
+    } else if (char === ',' && !inQuotes) {
+      result.push(current.trim());
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+  result.push(current.trim());
+  return result;
+}
+
+// Organization Name zu Domain konvertieren
+function orgNameToDomain(orgName: string): string {
+  return orgName
+    .toLowerCase()
+    .replace(/[^a-z0-9äöüß-]/g, '')
+    .replace(/ä/g, 'ae')
+    .replace(/ö/g, 'oe')
+    .replace(/ü/g, 'ue')
+    .replace(/ß/g, 'ss')
+    + '.de';
+}
 
 // Domain variant generator
 function generateDomainVariants(domain: string): string[] {
@@ -77,6 +119,7 @@ function generateDomainVariants(domain: string): string[] {
 export default function CsvImportPage() {
   const [csvImportSettings, setCsvImportSettings] = useState<CsvImportSettings>({
     emailForwardTo: "",
+    emailPrefix: "info",
     domains: [],
   });
   const [csvProcessingDomain, setCsvProcessingDomain] = useState<string | null>(null);
@@ -124,10 +167,25 @@ export default function CsvImportPage() {
       const text = event.target?.result as string;
       const lines = text.split('\n').map(l => l.trim()).filter(l => l);
 
-      const newDomains: ImportedDomain[] = lines
-        .filter(line => !csvImportSettings.domains.some(d => d.originalDomain === line))
-        .map(line => ({
-          originalDomain: line.toLowerCase(),
+      // Skip header line
+      const dataLines = lines.slice(1);
+
+      const newDomains: ImportedDomain[] = dataLines
+        .map(line => {
+          const columns = parseCSVLine(line);
+          const orgName = columns[0]?.replace(/"/g, ''); // Erste Spalte = organization name
+          if (!orgName) return null;
+
+          const domain = orgNameToDomain(orgName);
+          return domain;
+        })
+        .filter((domain): domain is string =>
+          domain !== null &&
+          domain.length > 3 &&
+          !csvImportSettings.domains.some(d => d.originalDomain === domain)
+        )
+        .map(domain => ({
+          originalDomain: domain,
           status: 'pending' as const,
           addedAt: new Date().toISOString(),
         }));
@@ -192,14 +250,14 @@ export default function CsvImportPage() {
 
       updateCsvDomain(originalDomain, { status: 'configuring_email' });
       const emailResult = await setEmailForward(domain.suggestedVariant, [
-        { username: 'info', forwardTo: csvImportSettings.emailForwardTo }
+        { username: csvImportSettings.emailPrefix || 'info', forwardTo: csvImportSettings.emailForwardTo }
       ]);
       if (!emailResult.success) {
         throw new Error(emailResult.message);
       }
 
       updateCsvDomain(originalDomain, { status: 'configuring_url' });
-      const urlResult = await setUrlForwarding(domain.suggestedVariant, originalDomain, true);
+      const urlResult = await setUrlForwarding(domain.suggestedVariant, `https://${originalDomain}`, true);
       if (!urlResult.success) {
         throw new Error(urlResult.message);
       }
@@ -225,14 +283,14 @@ export default function CsvImportPage() {
     try {
       updateCsvDomain(originalDomain, { status: 'configuring_email', error: undefined });
       const emailResult = await setEmailForward(domain.suggestedVariant, [
-        { username: 'info', forwardTo: csvImportSettings.emailForwardTo }
+        { username: csvImportSettings.emailPrefix || 'info', forwardTo: csvImportSettings.emailForwardTo }
       ]);
       if (!emailResult.success) {
         throw new Error(emailResult.message);
       }
 
       updateCsvDomain(originalDomain, { status: 'configuring_url' });
-      const urlResult = await setUrlForwarding(domain.suggestedVariant, originalDomain, true);
+      const urlResult = await setUrlForwarding(domain.suggestedVariant, `https://${originalDomain}`, true);
       if (!urlResult.success) {
         throw new Error(urlResult.message);
       }
@@ -327,8 +385,26 @@ export default function CsvImportPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
+            <div className="space-y-2">
+              <Label htmlFor="email-prefix">Email Präfix</Label>
+              <Select
+                value={csvImportSettings.emailPrefix || 'info'}
+                onValueChange={(value) => saveCsvSettings({ ...csvImportSettings, emailPrefix: value })}
+              >
+                <SelectTrigger className="w-[140px]">
+                  <SelectValue placeholder="Präfix wählen" />
+                </SelectTrigger>
+                <SelectContent>
+                  {EMAIL_PREFIXES.map(prefix => (
+                    <SelectItem key={prefix} value={prefix}>
+                      {prefix}@
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             <div className="flex-1 space-y-2">
-              <Label htmlFor="email-forward">Email-Weiterleitung Ziel</Label>
+              <Label htmlFor="email-forward">Weiterleitung an</Label>
               <Input
                 id="email-forward"
                 type="email"
