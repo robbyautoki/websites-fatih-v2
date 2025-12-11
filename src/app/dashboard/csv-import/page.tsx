@@ -201,38 +201,44 @@ export default function CsvImportPage() {
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
+  // Suche Varianten für EINE Domain
+  const handleSearchSingle = async (originalDomain: string) => {
+    setCsvProcessingDomain(originalDomain);
+    updateCsvDomain(originalDomain, { status: 'searching' });
+
+    const variants = generateDomainVariants(originalDomain);
+    let found = false;
+
+    for (const variant of variants) {
+      try {
+        const result = await searchDomain(variant);
+        if (result.available) {
+          updateCsvDomain(originalDomain, {
+            status: 'found',
+            suggestedVariant: variant,
+            variantPrice: result.price,
+          });
+          found = true;
+          break;
+        }
+      } catch (err) {
+        console.error(`Error checking ${variant}:`, err);
+      }
+    }
+
+    if (!found) {
+      updateCsvDomain(originalDomain, { status: 'no_variant' });
+    }
+    setCsvProcessingDomain(null);
+  };
+
+  // Suche Varianten für ALLE pending Domains
   const handleSearchVariants = async () => {
     const pendingDomains = csvImportSettings.domains.filter(d => d.status === 'pending');
 
     for (const domain of pendingDomains) {
-      setCsvProcessingDomain(domain.originalDomain);
-      updateCsvDomain(domain.originalDomain, { status: 'searching' });
-
-      const variants = generateDomainVariants(domain.originalDomain);
-      let found = false;
-
-      for (const variant of variants) {
-        try {
-          const result = await searchDomain(variant);
-          if (result.available) {
-            updateCsvDomain(domain.originalDomain, {
-              status: 'found',
-              suggestedVariant: variant,
-              variantPrice: result.price,
-            });
-            found = true;
-            break;
-          }
-        } catch (err) {
-          console.error(`Error checking ${variant}:`, err);
-        }
-      }
-
-      if (!found) {
-        updateCsvDomain(domain.originalDomain, { status: 'no_variant' });
-      }
+      await handleSearchSingle(domain.originalDomain);
     }
-    setCsvProcessingDomain(null);
   };
 
   const handleApprove = async (originalDomain: string) => {
@@ -468,6 +474,17 @@ export default function CsvImportPage() {
                       )}
                     </TableCell>
                     <TableCell className="text-right space-x-2">
+                      {d.status === 'pending' && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleSearchSingle(d.originalDomain)}
+                          disabled={!!csvProcessingDomain}
+                        >
+                          <SearchIcon className="mr-1 h-3 w-3" />
+                          Suchen
+                        </Button>
+                      )}
                       {d.status === 'found' && (
                         <Button
                           size="sm"
