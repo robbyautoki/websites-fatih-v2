@@ -272,3 +272,91 @@ export async function setupEmailDns(domain: string): Promise<{ success: boolean;
   }
   return response.json();
 }
+
+// ============================================
+// Imported Domains API (Database)
+// ============================================
+
+export interface ImportedDomain {
+  id: string;
+  originalDomain: string;
+  purchasedDomain: string | null;
+  price: number | null;
+  forwardUrl: string | null;
+  emailPrefix: string | null;
+  emailForwardTo: string | null;
+  status: string;
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
+  createdBy: string | null;
+}
+
+export async function fetchImportedDomains(): Promise<ImportedDomain[]> {
+  const response = await fetch(`${API_BASE}/imported-domains`);
+  if (!response.ok) {
+    throw new Error('Failed to fetch imported domains');
+  }
+  return response.json();
+}
+
+export async function createImportedDomain(data: { originalDomain: string; emailForwardTo?: string }): Promise<ImportedDomain> {
+  const response = await fetch(`${API_BASE}/imported-domains`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to create imported domain');
+  }
+  return response.json();
+}
+
+export async function createImportedDomains(domains: { originalDomain: string; emailForwardTo?: string }[]): Promise<{ success: boolean; count: number }> {
+  const response = await fetch(`${API_BASE}/imported-domains`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(domains),
+  });
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to create imported domains');
+  }
+  return response.json();
+}
+
+export async function updateImportedDomain(id: string, data: Partial<ImportedDomain>): Promise<ImportedDomain> {
+  const response = await fetch(`${API_BASE}/imported-domains/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to update imported domain');
+  }
+  return response.json();
+}
+
+export async function deleteImportedDomain(id: string): Promise<{ success: boolean }> {
+  const response = await fetch(`${API_BASE}/imported-domains/${id}`, {
+    method: 'DELETE',
+  });
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to delete imported domain');
+  }
+  return response.json();
+}
+
+export async function deleteAllImportedDomains(): Promise<{ success: boolean }> {
+  const response = await fetch(`${API_BASE}/imported-domains`, {
+    method: 'DELETE',
+  });
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to delete all imported domains');
+  }
+  return response.json();
+}

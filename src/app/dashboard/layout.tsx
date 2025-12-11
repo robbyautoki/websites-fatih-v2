@@ -26,7 +26,7 @@ const menuItems = [
 ]
 
 const domainItems = [
-  { icon: UploadIcon, label: 'CSV Import', href: '/dashboard/csv-import' },
+  { icon: UploadIcon, label: 'Datenbank', href: '/dashboard/csv-import' },
   { icon: GlobeIcon, label: 'Meine Domains', href: '/dashboard/domains' },
   { icon: MailIcon, label: 'Email Weiterleitung', href: '/dashboard/email' },
 ]

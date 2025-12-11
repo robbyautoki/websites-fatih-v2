@@ -1,0 +1,22 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model ImportedDomain {
+  id              String   @id @default(cuid())
+  originalDomain  String
+  purchasedDomain String?
+  price           Float?
+  forwardUrl      String?
+  emailPrefix     String?
+  emailForwardTo  String?
+  status          String   @default("pending")
+  error           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  createdBy       String?
+}

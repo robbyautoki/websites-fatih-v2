@@ -79,7 +79,7 @@ export default function DashboardPage() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">CSV Import</CardTitle>
+            <CardTitle className="text-sm font-medium">Datenbank</CardTitle>
             <UploadIcon className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
@@ -119,16 +119,16 @@ export default function DashboardPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <UploadIcon className="h-5 w-5" />
-              CSV Import
+              Datenbank
             </CardTitle>
             <CardDescription>
-              Lade eine CSV mit Domains hoch und finde automatisch verfuegbare Varianten.
+              Verwalte deine Domain-Datenbank und finde automatisch verfuegbare Varianten.
             </CardDescription>
           </CardHeader>
           <CardContent>
             <Button asChild className="w-full">
               <Link href="/dashboard/csv-import">
-                Zum CSV Import
+                Zur Datenbank
                 <ArrowRightIcon className="ml-2 h-4 w-4" />
               </Link>
             </Button>

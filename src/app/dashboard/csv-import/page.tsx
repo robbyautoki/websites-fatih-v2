@@ -9,6 +9,7 @@ import {
   TrashIcon,
   Loader2Icon,
   UploadIcon,
+  FileSpreadsheetIcon,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -16,6 +17,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -26,32 +34,24 @@ import {
 } from "@/components/ui/table";
 
 import {
-  fetchDomains,
   searchDomain,
   registerDomain,
   setEmailForward,
   setUrlForwarding,
+  fetchImportedDomains,
+  createImportedDomains,
+  updateImportedDomain,
+  deleteImportedDomain,
+  deleteAllImportedDomains,
+  type ImportedDomain,
 } from "@/lib/api";
 
-// Types
-interface ImportedDomain {
-  originalDomain: string;
-  suggestedVariant?: string;
-  variantPrice?: number;
-  forwardUrl?: string;  // Custom URL für Weiterleitung
-  status: 'pending' | 'searching' | 'found' | 'approving' | 'purchasing' | 'configuring_email' | 'configuring_url' | 'done' | 'error' | 'no_variant';
-  error?: string;
-  addedAt: string;
-}
-
-interface CsvImportSettings {
-  emailForwardTo: string;
-  lastEmailPrefix: string;  // Track last used prefix
-  domains: ImportedDomain[];
-}
-
-const CSV_STORAGE_KEY = "domain-csv-import-v2";
-const EMAIL_PREFIXES = ['info', 'support', 'sekretariat', 'it', 'kontakt', 'verwaltung', 'buero'];
+const EMAIL_PREFIXES = [
+  'sekretariat', 'verwaltung', 'info', 'kontakt',
+  'poststelle', 'schulleitung', 'rektorat', 'rektor',
+  'direktion', 'schulverwaltung', 'buero', 'schule'
+];
+const SETTINGS_KEY = 'csv-import-settings';
 
 // Random email prefix - never same as last one
 function getRandomEmailPrefix(lastPrefix: string): string {
@@ -83,8 +83,15 @@ function parseCSVLine(line: string): string[] {
 
 // Organization Name zu Domain konvertieren
 function orgNameToDomain(orgName: string): string {
-  return orgName
-    .toLowerCase()
+  const cleaned = orgName.trim().toLowerCase();
+
+  // Wenn schon eine Domain mit TLD (enthält Punkt), direkt zurückgeben
+  if (cleaned.includes('.')) {
+    return cleaned;
+  }
+
+  // Sonst: Name zu Domain konvertieren
+  return cleaned
     .replace(/[^a-z0-9äöüß-]/g, '')
     .replace(/ä/g, 'ae')
     .replace(/ö/g, 'oe')
@@ -118,46 +125,69 @@ function generateDomainVariants(domain: string): string[] {
 }
 
 export default function CsvImportPage() {
-  const [csvImportSettings, setCsvImportSettings] = useState<CsvImportSettings>({
-    emailForwardTo: "",
-    lastEmailPrefix: "",
-    domains: [],
-  });
-  const [csvProcessingDomain, setCsvProcessingDomain] = useState<string | null>(null);
+  const [domains, setDomains] = useState<ImportedDomain[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [processingId, setProcessingId] = useState<string | null>(null);
+  const [emailForwardTo, setEmailForwardTo] = useState('');
+  const [lastEmailPrefix, setLastEmailPrefix] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const loadCsvSettings = useCallback(() => {
-    try {
-      const saved = localStorage.getItem(CSV_STORAGE_KEY);
-      if (saved) {
-        setCsvImportSettings(JSON.parse(saved));
+  // CSV Preview States
+  const [csvData, setCsvData] = useState<string[][] | null>(null);
+  const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
+  const [selectedColumn, setSelectedColumn] = useState<number>(0);
+  const [importing, setImporting] = useState(false);
+
+  // Load settings from localStorage
+  useEffect(() => {
+    const saved = localStorage.getItem(SETTINGS_KEY);
+    if (saved) {
+      try {
+        const settings = JSON.parse(saved);
+        setEmailForwardTo(settings.emailForwardTo || '');
+        setLastEmailPrefix(settings.lastEmailPrefix || '');
+      } catch {
+        // ignore
       }
-    } catch (err) {
-      console.error("Failed to load CSV settings:", err);
     }
   }, []);
 
-  const saveCsvSettings = useCallback((settings: CsvImportSettings) => {
-    localStorage.setItem(CSV_STORAGE_KEY, JSON.stringify(settings));
-    setCsvImportSettings(settings);
+  // Save settings to localStorage
+  const saveSettings = useCallback((email: string, prefix: string) => {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({
+      emailForwardTo: email,
+      lastEmailPrefix: prefix
+    }));
   }, []);
 
-  const updateCsvDomain = useCallback((originalDomain: string, update: Partial<ImportedDomain>) => {
-    setCsvImportSettings(prev => {
-      const updated = {
-        ...prev,
-        domains: prev.domains.map(d =>
-          d.originalDomain === originalDomain ? { ...d, ...update } : d
-        ),
-      };
-      localStorage.setItem(CSV_STORAGE_KEY, JSON.stringify(updated));
-      return updated;
-    });
+  // Load domains from database
+  const loadDomains = useCallback(async () => {
+    try {
+      setLoading(true);
+      const data = await fetchImportedDomains();
+      setDomains(data);
+    } catch (err) {
+      console.error('Failed to load domains:', err);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
-    loadCsvSettings();
-  }, [loadCsvSettings]);
+    loadDomains();
+  }, [loadDomains]);
+
+  // Update domain in database
+  const updateDomain = async (id: string, data: Partial<ImportedDomain>) => {
+    try {
+      const updated = await updateImportedDomain(id, data);
+      setDomains(prev => prev.map(d => d.id === id ? updated : d));
+      return updated;
+    } catch (err) {
+      console.error('Failed to update domain:', err);
+      throw err;
+    }
+  };
 
   const handleCsvUpload = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -168,56 +198,87 @@ export default function CsvImportPage() {
       const text = event.target?.result as string;
       const lines = text.split('\n').map(l => l.trim()).filter(l => l);
 
-      // Skip header line
-      const dataLines = lines.slice(1);
+      if (lines.length === 0) return;
 
-      const newDomains: ImportedDomain[] = dataLines
-        .map(line => {
-          const columns = parseCSVLine(line);
-          const orgName = columns[0]?.replace(/"/g, ''); // Erste Spalte = organization name
-          if (!orgName) return null;
+      // Parse all lines
+      const parsedLines = lines.map(line => parseCSVLine(line));
 
-          const domain = orgNameToDomain(orgName);
-          return domain;
-        })
-        .filter((domain): domain is string =>
-          domain !== null &&
-          domain.length > 3 &&
-          !csvImportSettings.domains.some(d => d.originalDomain === domain)
-        )
-        .map(domain => ({
-          originalDomain: domain,
-          status: 'pending' as const,
-          addedAt: new Date().toISOString(),
-        }));
+      // First line is headers
+      const headers = parsedLines[0];
+      const data = parsedLines.slice(1);
 
-      if (newDomains.length > 0) {
-        saveCsvSettings({
-          ...csvImportSettings,
-          domains: [...csvImportSettings.domains, ...newDomains],
-        });
-      }
+      setCsvHeaders(headers);
+      setCsvData(data);
+      setSelectedColumn(0);
     };
     reader.readAsText(file);
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  // Suche Varianten für EINE Domain
-  const handleSearchSingle = async (originalDomain: string) => {
-    setCsvProcessingDomain(originalDomain);
-    updateCsvDomain(originalDomain, { status: 'searching' });
+  const handleCancelCsvPreview = () => {
+    setCsvData(null);
+    setCsvHeaders([]);
+    setSelectedColumn(0);
+  };
 
-    const variants = generateDomainVariants(originalDomain);
+  const handleImportCsv = async () => {
+    if (!csvData) return;
+
+    setImporting(true);
+    const existingDomains = new Set(domains.map(d => d.originalDomain));
+
+    // Prepare all domains in one batch
+    const domainsToCreate: { originalDomain: string; emailForwardTo?: string }[] = [];
+
+    for (const row of csvData) {
+      const orgName = row[selectedColumn]?.replace(/"/g, '');
+      if (!orgName) continue;
+
+      const domain = orgNameToDomain(orgName);
+      if (domain.length <= 3 || existingDomains.has(domain)) continue;
+
+      domainsToCreate.push({
+        originalDomain: domain,
+        emailForwardTo: emailForwardTo || undefined
+      });
+      existingDomains.add(domain);
+    }
+
+    // Single batch API call
+    if (domainsToCreate.length > 0) {
+      try {
+        await createImportedDomains(domainsToCreate);
+        await loadDomains(); // Refresh all data
+      } catch (err) {
+        console.error('Failed to create domains:', err);
+      }
+    }
+
+    setImporting(false);
+    setCsvData(null);
+    setCsvHeaders([]);
+    setSelectedColumn(0);
+  };
+
+  // Search for variants for a single domain
+  const handleSearchSingle = async (id: string) => {
+    const domain = domains.find(d => d.id === id);
+    if (!domain) return;
+
+    setProcessingId(id);
+    await updateDomain(id, { status: 'searching' });
+
+    const variants = generateDomainVariants(domain.originalDomain);
     let found = false;
 
     for (const variant of variants) {
       try {
         const result = await searchDomain(variant);
         if (result.available) {
-          updateCsvDomain(originalDomain, {
+          await updateDomain(id, {
             status: 'found',
-            suggestedVariant: variant,
-            variantPrice: result.price,
+            purchasedDomain: variant,
+            price: result.price,
           });
           found = true;
           break;
@@ -228,116 +289,133 @@ export default function CsvImportPage() {
     }
 
     if (!found) {
-      updateCsvDomain(originalDomain, { status: 'no_variant' });
+      await updateDomain(id, { status: 'no_variant' });
     }
-    setCsvProcessingDomain(null);
+    setProcessingId(null);
   };
 
-  // Suche Varianten für ALLE pending Domains
+  // Search variants for ALL pending domains
   const handleSearchVariants = async () => {
-    const pendingDomains = csvImportSettings.domains.filter(d => d.status === 'pending');
+    const pendingDomains = domains.filter(d => d.status === 'pending');
 
     for (const domain of pendingDomains) {
-      await handleSearchSingle(domain.originalDomain);
+      await handleSearchSingle(domain.id);
     }
   };
 
-  const handleApprove = async (originalDomain: string) => {
-    const domain = csvImportSettings.domains.find(d => d.originalDomain === originalDomain);
-    if (!domain?.suggestedVariant || !csvImportSettings.emailForwardTo) return;
+  const handleApprove = async (id: string) => {
+    const domain = domains.find(d => d.id === id);
+    if (!domain?.purchasedDomain || !emailForwardTo) return;
 
-    setCsvProcessingDomain(originalDomain);
+    setProcessingId(id);
 
     try {
-      updateCsvDomain(originalDomain, { status: 'purchasing' });
-      const purchaseResult = await registerDomain(domain.suggestedVariant);
+      await updateDomain(id, { status: 'purchasing' });
+      const purchaseResult = await registerDomain(domain.purchasedDomain);
       if (!purchaseResult.success) {
         throw new Error(purchaseResult.message);
       }
 
       // Random email prefix - never same as last one
-      const emailPrefix = getRandomEmailPrefix(csvImportSettings.lastEmailPrefix);
-      saveCsvSettings({ ...csvImportSettings, lastEmailPrefix: emailPrefix });
+      const emailPrefix = getRandomEmailPrefix(lastEmailPrefix);
+      setLastEmailPrefix(emailPrefix);
+      saveSettings(emailForwardTo, emailPrefix);
 
-      updateCsvDomain(originalDomain, { status: 'configuring_email' });
-      const emailResult = await setEmailForward(domain.suggestedVariant, [
-        { username: emailPrefix, forwardTo: csvImportSettings.emailForwardTo }
+      await updateDomain(id, { status: 'configuring_email', emailPrefix });
+      const emailResult = await setEmailForward(domain.purchasedDomain, [
+        { username: emailPrefix, forwardTo: emailForwardTo }
       ]);
       if (!emailResult.success) {
         throw new Error(emailResult.message);
       }
 
       // Use custom URL if provided, otherwise fallback to original domain
-      const forwardUrl = domain.forwardUrl || `https://${originalDomain}`;
-      updateCsvDomain(originalDomain, { status: 'configuring_url' });
-      const urlResult = await setUrlForwarding(domain.suggestedVariant, forwardUrl, true);
+      const forwardUrl = domain.forwardUrl || `https://${domain.originalDomain}`;
+      await updateDomain(id, { status: 'configuring_url', forwardUrl });
+      const urlResult = await setUrlForwarding(domain.purchasedDomain, forwardUrl, true);
       if (!urlResult.success) {
         throw new Error(urlResult.message);
       }
 
-      updateCsvDomain(originalDomain, { status: 'done' });
-      fetchDomains();
+      await updateDomain(id, { status: 'done' });
     } catch (err) {
-      updateCsvDomain(originalDomain, {
+      await updateDomain(id, {
         status: 'error',
         error: err instanceof Error ? err.message : 'Unbekannter Fehler',
       });
     } finally {
-      setCsvProcessingDomain(null);
+      setProcessingId(null);
     }
   };
 
-  const handleRetryConfiguration = async (originalDomain: string) => {
-    const domain = csvImportSettings.domains.find(d => d.originalDomain === originalDomain);
-    if (!domain?.suggestedVariant || !csvImportSettings.emailForwardTo) return;
+  const handleRetryConfiguration = async (id: string) => {
+    const domain = domains.find(d => d.id === id);
+    if (!domain?.purchasedDomain || !emailForwardTo) return;
 
-    setCsvProcessingDomain(originalDomain);
+    setProcessingId(id);
 
     try {
       // Random email prefix - never same as last one
-      const emailPrefix = getRandomEmailPrefix(csvImportSettings.lastEmailPrefix);
-      saveCsvSettings({ ...csvImportSettings, lastEmailPrefix: emailPrefix });
+      const emailPrefix = getRandomEmailPrefix(lastEmailPrefix);
+      setLastEmailPrefix(emailPrefix);
+      saveSettings(emailForwardTo, emailPrefix);
 
-      updateCsvDomain(originalDomain, { status: 'configuring_email', error: undefined });
-      const emailResult = await setEmailForward(domain.suggestedVariant, [
-        { username: emailPrefix, forwardTo: csvImportSettings.emailForwardTo }
+      await updateDomain(id, { status: 'configuring_email', error: null, emailPrefix });
+      const emailResult = await setEmailForward(domain.purchasedDomain, [
+        { username: emailPrefix, forwardTo: emailForwardTo }
       ]);
       if (!emailResult.success) {
         throw new Error(emailResult.message);
       }
 
       // Use custom URL if provided, otherwise fallback to original domain
-      const forwardUrl = domain.forwardUrl || `https://${originalDomain}`;
-      updateCsvDomain(originalDomain, { status: 'configuring_url' });
-      const urlResult = await setUrlForwarding(domain.suggestedVariant, forwardUrl, true);
+      const forwardUrl = domain.forwardUrl || `https://${domain.originalDomain}`;
+      await updateDomain(id, { status: 'configuring_url', forwardUrl });
+      const urlResult = await setUrlForwarding(domain.purchasedDomain, forwardUrl, true);
       if (!urlResult.success) {
         throw new Error(urlResult.message);
       }
 
-      updateCsvDomain(originalDomain, { status: 'done' });
+      await updateDomain(id, { status: 'done' });
     } catch (err) {
-      updateCsvDomain(originalDomain, {
+      await updateDomain(id, {
         status: 'error',
         error: err instanceof Error ? err.message : 'Unbekannter Fehler',
       });
     } finally {
-      setCsvProcessingDomain(null);
+      setProcessingId(null);
     }
   };
 
-  const handleRemoveCsvDomain = (originalDomain: string) => {
-    saveCsvSettings({
-      ...csvImportSettings,
-      domains: csvImportSettings.domains.filter(d => d.originalDomain !== originalDomain),
-    });
+  const handleRemoveDomain = async (id: string) => {
+    try {
+      await deleteImportedDomain(id);
+      setDomains(prev => prev.filter(d => d.id !== id));
+    } catch (err) {
+      console.error('Failed to delete domain:', err);
+    }
   };
 
-  const handleClearCsvList = () => {
-    saveCsvSettings({ ...csvImportSettings, domains: [] });
+  const handleClearAll = async () => {
+    try {
+      await deleteAllImportedDomains();
+      setDomains([]);
+    } catch (err) {
+      console.error('Failed to clear domains:', err);
+    }
   };
 
-  const getStatusBadge = (status: ImportedDomain['status']) => {
-    const variants: Record<ImportedDomain['status'], { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
+  const handleEmailChange = (value: string) => {
+    setEmailForwardTo(value);
+    saveSettings(value, lastEmailPrefix);
+  };
+
+  const handleForwardUrlChange = async (id: string, value: string) => {
+    await updateDomain(id, { forwardUrl: value });
+  };
+
+  const getStatusBadge = (status: string) => {
+    const variants: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
       pending: { label: "Wartend", variant: "outline" },
       searching: { label: "Suche...", variant: "secondary" },
       found: { label: "Gefunden", variant: "default" },
@@ -349,20 +427,28 @@ export default function CsvImportPage() {
       error: { label: "Fehler", variant: "destructive" },
       no_variant: { label: "Keine Variante", variant: "destructive" },
     };
-    const { label, variant } = variants[status];
+    const { label, variant } = variants[status] || { label: status, variant: "outline" as const };
     return <Badge variant={variant}>{label}</Badge>;
   };
 
-  const pendingCount = csvImportSettings.domains.filter(d => d.status === 'pending').length;
-  const foundCount = csvImportSettings.domains.filter(d => d.status === 'found').length;
-  const doneCount = csvImportSettings.domains.filter(d => d.status === 'done').length;
+  const pendingCount = domains.filter(d => d.status === 'pending').length;
+  const foundCount = domains.filter(d => d.status === 'found').length;
+  const doneCount = domains.filter(d => d.status === 'done').length;
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <Loader2Icon className="h-8 w-8 animate-spin" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-bold tracking-tight">CSV Import</h2>
+        <h2 className="text-2xl font-bold tracking-tight">Datenbank</h2>
         <p className="text-muted-foreground">
-          Lade eine CSV mit Haupt-Domains hoch. Das System sucht verfuegbare Varianten und kauft diese automatisch.
+          Verwalte deine Domain-Datenbank. Lade CSVs hoch und suche verfuegbare Varianten.
         </p>
       </div>
 
@@ -371,7 +457,7 @@ export default function CsvImportPage() {
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Total</CardDescription>
-            <CardTitle className="text-2xl">{csvImportSettings.domains.length}</CardTitle>
+            <CardTitle className="text-2xl">{domains.length}</CardTitle>
           </CardHeader>
         </Card>
         <Card>
@@ -397,7 +483,7 @@ export default function CsvImportPage() {
       {/* Upload & Settings */}
       <Card>
         <CardHeader>
-          <CardTitle>CSV Import - Domain Varianten</CardTitle>
+          <CardTitle>CSV Import</CardTitle>
           <CardDescription>
             Lade eine CSV mit Haupt-Domains hoch. Das System sucht verfuegbare Varianten und kauft diese automatisch.
           </CardDescription>
@@ -410,11 +496,11 @@ export default function CsvImportPage() {
                 id="email-forward"
                 type="email"
                 placeholder="deine@email.de"
-                value={csvImportSettings.emailForwardTo}
-                onChange={(e) => saveCsvSettings({ ...csvImportSettings, emailForwardTo: e.target.value })}
+                value={emailForwardTo}
+                onChange={(e) => handleEmailChange(e.target.value)}
               />
               <p className="text-xs text-muted-foreground">
-                Email Präfix wird automatisch zufällig gewählt (info, support, sekretariat, etc.)
+                Email Praefix wird automatisch zufaellig gewaehlt (info, support, sekretariat, etc.)
               </p>
             </div>
             <div className="flex gap-2">
@@ -430,13 +516,13 @@ export default function CsvImportPage() {
                 onChange={handleCsvUpload}
               />
               {pendingCount > 0 && (
-                <Button onClick={handleSearchVariants} disabled={!!csvProcessingDomain}>
+                <Button onClick={handleSearchVariants} disabled={!!processingId}>
                   <SearchIcon className="mr-2 h-4 w-4" />
                   Varianten suchen
                 </Button>
               )}
-              {csvImportSettings.domains.length > 0 && (
-                <Button variant="destructive" size="icon" onClick={handleClearCsvList}>
+              {domains.length > 0 && (
+                <Button variant="destructive" size="icon" onClick={handleClearAll}>
                   <TrashIcon className="h-4 w-4" />
                 </Button>
               )}
@@ -445,8 +531,99 @@ export default function CsvImportPage() {
         </CardContent>
       </Card>
 
+      {/* CSV Preview & Column Selector */}
+      {csvData && csvData.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <FileSpreadsheetIcon className="h-5 w-5" />
+              CSV Vorschau
+            </CardTitle>
+            <CardDescription>
+              Waehle die Spalte aus, die die Domain-Namen enthaelt.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
+              <div className="flex-1 space-y-2">
+                <Label>Domain-Spalte</Label>
+                <Select
+                  value={String(selectedColumn)}
+                  onValueChange={(v) => setSelectedColumn(parseInt(v))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Spalte waehlen" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {csvHeaders.map((header, i) => (
+                      <SelectItem key={i} value={String(i)}>
+                        {header || `Spalte ${i + 1}`}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={handleCancelCsvPreview}>
+                  <XIcon className="mr-2 h-4 w-4" />
+                  Abbrechen
+                </Button>
+                <Button onClick={handleImportCsv} disabled={importing}>
+                  {importing ? (
+                    <Loader2Icon className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <CheckIcon className="mr-2 h-4 w-4" />
+                  )}
+                  {csvData.length} Zeilen importieren
+                </Button>
+              </div>
+            </div>
+
+            {/* Preview Table */}
+            <div className="border rounded-md overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    {csvHeaders.map((header, i) => (
+                      <TableHead
+                        key={i}
+                        className={i === selectedColumn ? "bg-primary/10 font-bold" : ""}
+                      >
+                        {header || `Spalte ${i + 1}`}
+                        {i === selectedColumn && (
+                          <Badge variant="secondary" className="ml-2">Domain</Badge>
+                        )}
+                      </TableHead>
+                    ))}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {csvData.slice(0, 5).map((row, rowIndex) => (
+                    <TableRow key={rowIndex}>
+                      {row.map((cell, cellIndex) => (
+                        <TableCell
+                          key={cellIndex}
+                          className={cellIndex === selectedColumn ? "bg-primary/10 font-medium" : ""}
+                        >
+                          {cell || "-"}
+                        </TableCell>
+                      ))}
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+            {csvData.length > 5 && (
+              <p className="text-sm text-muted-foreground text-center">
+                ... und {csvData.length - 5} weitere Zeilen
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       {/* Domain Table */}
-      {csvImportSettings.domains.length > 0 && (
+      {domains.length > 0 && (
         <Card>
           <CardContent className="p-0">
             <Table>
@@ -461,16 +638,16 @@ export default function CsvImportPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {csvImportSettings.domains.map((d) => (
-                  <TableRow key={d.originalDomain}>
+                {domains.map((d) => (
+                  <TableRow key={d.id}>
                     <TableCell className="font-medium">{d.originalDomain}</TableCell>
-                    <TableCell>{d.suggestedVariant || "-"}</TableCell>
-                    <TableCell>{d.variantPrice ? `${d.variantPrice}€` : "-"}</TableCell>
+                    <TableCell>{d.purchasedDomain || "-"}</TableCell>
+                    <TableCell>{d.price ? `${d.price}€` : "-"}</TableCell>
                     <TableCell>
                       <Input
                         placeholder={`https://${d.originalDomain}`}
                         value={d.forwardUrl || ''}
-                        onChange={(e) => updateCsvDomain(d.originalDomain, { forwardUrl: e.target.value })}
+                        onChange={(e) => handleForwardUrlChange(d.id, e.target.value)}
                         className="w-40 text-xs"
                       />
                     </TableCell>
@@ -485,8 +662,8 @@ export default function CsvImportPage() {
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() => handleSearchSingle(d.originalDomain)}
-                          disabled={!!csvProcessingDomain}
+                          onClick={() => handleSearchSingle(d.id)}
+                          disabled={!!processingId}
                         >
                           <SearchIcon className="mr-1 h-3 w-3" />
                           Suchen
@@ -495,19 +672,19 @@ export default function CsvImportPage() {
                       {d.status === 'found' && (
                         <Button
                           size="sm"
-                          onClick={() => handleApprove(d.originalDomain)}
-                          disabled={!!csvProcessingDomain || !csvImportSettings.emailForwardTo}
+                          onClick={() => handleApprove(d.id)}
+                          disabled={!!processingId || !emailForwardTo}
                         >
                           <CheckIcon className="mr-1 h-3 w-3" />
                           Kaufen
                         </Button>
                       )}
-                      {(d.status === 'error' || d.status === 'done') && d.suggestedVariant && (
+                      {(d.status === 'error' || d.status === 'done') && d.purchasedDomain && (
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() => handleRetryConfiguration(d.originalDomain)}
-                          disabled={!!csvProcessingDomain || !csvImportSettings.emailForwardTo}
+                          onClick={() => handleRetryConfiguration(d.id)}
+                          disabled={!!processingId || !emailForwardTo}
                         >
                           <RefreshCwIcon className="mr-1 h-3 w-3" />
                           Retry
@@ -519,7 +696,7 @@ export default function CsvImportPage() {
                       <Button
                         size="sm"
                         variant="ghost"
-                        onClick={() => handleRemoveCsvDomain(d.originalDomain)}
+                        onClick={() => handleRemoveDomain(d.id)}
                       >
                         <XIcon className="h-4 w-4" />
                       </Button>
