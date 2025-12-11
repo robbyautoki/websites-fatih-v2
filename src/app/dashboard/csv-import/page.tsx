@@ -435,6 +435,9 @@ export default function CsvImportPage() {
   const foundCount = domains.filter(d => d.status === 'found').length;
   const doneCount = domains.filter(d => d.status === 'done').length;
 
+  // Filter out purchased domains (status=done) from the table view
+  const activeDomains = domains.filter(d => d.status !== 'done');
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -623,7 +626,7 @@ export default function CsvImportPage() {
       )}
 
       {/* Domain Table */}
-      {domains.length > 0 && (
+      {activeDomains.length > 0 && (
         <Card>
           <CardContent className="p-0">
             <Table>
@@ -638,7 +641,7 @@ export default function CsvImportPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {domains.map((d) => (
+                {activeDomains.map((d) => (
                   <TableRow key={d.id}>
                     <TableCell className="font-medium">{d.originalDomain}</TableCell>
                     <TableCell>{d.purchasedDomain || "-"}</TableCell>
