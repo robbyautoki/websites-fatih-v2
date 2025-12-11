@@ -118,17 +118,20 @@ export async function registerDomain(domain: string, duration: number = 1): Prom
 export async function listDomains(): Promise<DomainInfo[]> {
   const result = await dynadotRequest('list_domain');
 
-  // Log the full response structure for debugging
-  console.log('Full list_domain response structure:', JSON.stringify(result, null, 2));
+  // The actual structure is:
+  // ListDomainInfoResponse.ListDomainInfoContent.DomainInfoList.DomainInfo.Domain = Array
+  const domainInfo = result.ListDomainInfoResponse?.ListDomainInfoContent?.DomainInfoList?.DomainInfo;
 
-  // Handle response format - try multiple paths
-  const domains = result.ListDomainInfoResponse?.ListDomainInfoContent?.DomainInfoList?.DomainInfo
-    || result.ListDomainInfoResponse?.DomainInfoList?.DomainInfo
-    || result.ListDomainInfoResponse?.ListDomainInfoContent?.DomainInfo
-    || result.ListDomainInfoResponse?.DomainInfo;
+  if (!domainInfo) {
+    console.log('No DomainInfo found in response');
+    return [];
+  }
+
+  // The domains are in domainInfo.Domain
+  const domains = domainInfo.Domain;
 
   if (!domains) {
-    console.log('No domains found in response. Available keys:', Object.keys(result.ListDomainInfoResponse || {}));
+    console.log('No Domain array found');
     return [];
   }
 
@@ -137,33 +140,24 @@ export async function listDomains(): Promise<DomainInfo[]> {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return domainList.map((d: any) => {
-    // Log raw domain object to understand structure
-    console.log('Raw domain object:', JSON.stringify(d, null, 2));
+    // Domain name is in d.Name
+    const domainName = d.Name || '';
 
-    // Try multiple possible paths for domain name
-    const domainName = d.Name || d.Domain?.Name || d.DomainName || d.domain || '';
-
-    // Try multiple paths for expiration
-    const rawExpiration = d.Expiration || d.Domain?.Expiration || d.ExpirationDate || '';
+    // Expiration is a Unix timestamp in milliseconds
     let expiration: string | undefined;
-    if (rawExpiration) {
+    if (d.Expiration) {
       try {
-        // Handle Unix timestamp (milliseconds)
-        const timestamp = parseInt(rawExpiration);
+        const timestamp = typeof d.Expiration === 'number' ? d.Expiration : parseInt(d.Expiration);
         if (!isNaN(timestamp)) {
           expiration = new Date(timestamp).toISOString().split('T')[0];
-        } else {
-          expiration = new Date(rawExpiration).toISOString().split('T')[0];
         }
       } catch {
-        expiration = rawExpiration;
+        expiration = undefined;
       }
     }
 
-    // Try multiple paths for status
-    const status = d.Status || d.Domain?.Status || d.RegistrationStatus || 'active';
-
-    console.log('Parsed domain:', { domainName, expiration, status });
+    // Status is in d.Status
+    const status = d.Status || 'active';
 
     return {
       domain: domainName,
