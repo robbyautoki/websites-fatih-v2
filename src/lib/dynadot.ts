@@ -118,23 +118,59 @@ export async function registerDomain(domain: string, duration: number = 1): Prom
 export async function listDomains(): Promise<DomainInfo[]> {
   const result = await dynadotRequest('list_domain');
 
-  // Handle response format
+  // Log the full response structure for debugging
+  console.log('Full list_domain response structure:', JSON.stringify(result, null, 2));
+
+  // Handle response format - try multiple paths
   const domains = result.ListDomainInfoResponse?.ListDomainInfoContent?.DomainInfoList?.DomainInfo
-    || result.ListDomainInfoResponse?.DomainInfoList?.DomainInfo;
+    || result.ListDomainInfoResponse?.DomainInfoList?.DomainInfo
+    || result.ListDomainInfoResponse?.ListDomainInfoContent?.DomainInfo
+    || result.ListDomainInfoResponse?.DomainInfo;
 
   if (!domains) {
-    console.log('No domains found in response');
+    console.log('No domains found in response. Available keys:', Object.keys(result.ListDomainInfoResponse || {}));
     return [];
   }
 
   const domainList = Array.isArray(domains) ? domains : [domains];
+  console.log(`Found ${domainList.length} domains`);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return domainList.map((d: any) => ({
-    domain: d.Domain?.Name || d.Name,
-    expiration: d.Domain?.Expiration ? new Date(d.Domain.Expiration).toISOString().split('T')[0] : d.Expiration,
-    status: d.Domain?.Status || d.Status
-  }));
+  return domainList.map((d: any) => {
+    // Log raw domain object to understand structure
+    console.log('Raw domain object:', JSON.stringify(d, null, 2));
+
+    // Try multiple possible paths for domain name
+    const domainName = d.Name || d.Domain?.Name || d.DomainName || d.domain || '';
+
+    // Try multiple paths for expiration
+    const rawExpiration = d.Expiration || d.Domain?.Expiration || d.ExpirationDate || '';
+    let expiration: string | undefined;
+    if (rawExpiration) {
+      try {
+        // Handle Unix timestamp (milliseconds)
+        const timestamp = parseInt(rawExpiration);
+        if (!isNaN(timestamp)) {
+          expiration = new Date(timestamp).toISOString().split('T')[0];
+        } else {
+          expiration = new Date(rawExpiration).toISOString().split('T')[0];
+        }
+      } catch {
+        expiration = rawExpiration;
+      }
+    }
+
+    // Try multiple paths for status
+    const status = d.Status || d.Domain?.Status || d.RegistrationStatus || 'active';
+
+    console.log('Parsed domain:', { domainName, expiration, status });
+
+    return {
+      domain: domainName,
+      expiration,
+      status
+    };
+  });
 }
 
 // Set email forwarding (Dynadot built-in feature)
